@@ -149,7 +149,7 @@ final class LocationEngine: ObservableObject {
             return
         }
 
-        let ready = await core.isReady(withNetworkCheck: true, withDDIMountCheck: false)
+        let ready = await core.isReady(withNetworkCheck: false, withDDIMountCheck: false)
         if case .failure(let err) = ready {
             status = "Not connected: \(core.describeError(err)). Is LocalDevVPN on?"
             return
