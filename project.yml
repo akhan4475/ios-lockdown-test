@@ -4,8 +4,7 @@ options:
     iOS: "16.0"
 packages:
   Minimuxer:
-    url: https://github.com/SideStore/minimuxer
-    revision: 12be70dc2627307a16bfd2dc7a009080d5bec909
+    path: Vendor/minimuxer
 targets:
   LockdownTest:
     type: application
