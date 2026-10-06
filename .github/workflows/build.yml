@@ -32,6 +32,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build
 
+      - name: Inspect idevice FFI symbols
+        run: |
+          LIB=build/Build/Products/Release-iphoneos/libidevice_ffi.a
+          ls -l "$LIB"
+          nm -g "$LIB" 2>/dev/null | grep -i -E "location_simulation|remote_server|process_control|simulat" | sort -u | head -80
+
       - name: Package IPA
         run: |
           mkdir Payload
