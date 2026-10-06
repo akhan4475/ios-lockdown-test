@@ -53,7 +53,9 @@ final class LocationEngine: ObservableObject {
     @Published var lastError = ""
 
     @Published var keepAlive = true
-    @Published var overridePeer = ""
+    @Published var overridePeer: String = UserDefaults.standard.string(forKey: "overridePeer") ?? "" {
+        didSet { UserDefaults.standard.set(overridePeer, forKey: "overridePeer") }
+    }
 
     private var ticker: Task<Void, Never>?
     private var cumulative: [Double] = []
@@ -86,9 +88,16 @@ final class LocationEngine: ObservableObject {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let dest = docsURL.appendingPathComponent("pairingFile.plist")
+        if url.standardizedFileURL.path == dest.standardizedFileURL.path {
+            message = "That file is already in the app. Nothing changed."
+            return
+        }
+        let temp = docsURL.appendingPathComponent("pairingFile.import.tmp")
         do {
+            try? FileManager.default.removeItem(at: temp)
+            try FileManager.default.copyItem(at: url, to: temp)
             if FileManager.default.fileExists(atPath: dest.path) { try FileManager.default.removeItem(at: dest) }
-            try FileManager.default.copyItem(at: url, to: dest)
+            try FileManager.default.moveItem(at: temp, to: dest)
             message = "Pairing file saved in the app."
         } catch {
             message = "Could not import file: \(error.localizedDescription)"
