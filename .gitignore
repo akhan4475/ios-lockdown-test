@@ -1,0 +1,25 @@
+# Secrets: pairing files are credentials for your phone. Never commit.
+*.mobiledevicepairing
+*.plist.pairing
+*pairing*
+*.pairing
+*.p12
+*.mobileprovision
+*.pem
+*.key
+.env
+.env.*
+
+# Build output
+*.ipa
+*.xcarchive
+build/
+DerivedData/
+*.xcodeproj
+Resources/Info.plist
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,21 @@
+name: LockdownTest
+options:
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  LockdownTest:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Lockdown Test
+        UILaunchScreen: {}
+        NSLocalNetworkUsageDescription: Probes the on-device loopback tunnel for testing.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lockdowntest.app
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
