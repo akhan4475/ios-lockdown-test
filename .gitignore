@@ -24,3 +24,6 @@ Resources/Info.plist
 Thumbs.db
 .vscode/
 .idea/
+
+Vendor/IDevice.xcframework/
+IDevice.xcframework/
