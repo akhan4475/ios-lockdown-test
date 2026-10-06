@@ -3,6 +3,7 @@
 *.plist.pairing
 *pairing*
 *.pairing
+!Vendor/minimuxer/**/*.swift
 *.p12
 *.mobileprovision
 *.pem
