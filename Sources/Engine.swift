@@ -1,0 +1,292 @@
+import SwiftUI
+import MapKit
+import CoreLocation
+import Minimuxer
+
+extension MKPolyline {
+    var coords: [CLLocationCoordinate2D] {
+        var arr = [CLLocationCoordinate2D](repeating: CLLocationCoordinate2D(), count: pointCount)
+        getCoordinates(&arr, range: NSRange(location: 0, length: pointCount))
+        return arr
+    }
+}
+
+@MainActor
+final class LocationEngine: ObservableObject {
+    @Published var status = "Starting..."
+    @Published var isReady = false
+    @Published var ddiMounted: Bool? = nil
+    @Published var pairingName: String? = nil
+    @Published var busy = false
+    @Published var message = ""
+
+    @Published var current: CLLocationCoordinate2D?
+    @Published var holding = false
+    @Published var route: [CLLocationCoordinate2D] = []
+    @Published var routeDistance: Double = 0
+    @Published var traveled: Double = 0
+    @Published var driving = false
+    @Published var paused = false
+    @Published var speedMph: Double = 45
+
+    @Published var okCount = 0
+    @Published var failCount = 0
+    @Published var lastError = ""
+
+    @Published var keepAlive = true
+    @Published var overridePeer = ""
+
+    private var ticker: Task<Void, Never>?
+    private var cumulative: [Double] = []
+    private var lastTick = Date()
+
+    private var docsURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+
+    // MARK: Pairing file
+
+    func findPairingFile() -> URL? {
+        let files = (try? FileManager.default.contentsOfDirectory(at: docsURL, includingPropertiesForKeys: nil)) ?? []
+        let candidates = files.filter { ["plist", "mobiledevicepairing"].contains($0.pathExtension.lowercased()) }
+        return candidates.first(where: { $0.lastPathComponent == "pairingFile.plist" }) ?? candidates.first
+    }
+
+    func importPairingFile(from url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let dest = docsURL.appendingPathComponent("pairingFile.plist")
+        do {
+            if FileManager.default.fileExists(atPath: dest.path) { try FileManager.default.removeItem(at: dest) }
+            try FileManager.default.copyItem(at: url, to: dest)
+            message = "Pairing file saved in the app."
+        } catch {
+            message = "Could not import file: \(error.localizedDescription)"
+        }
+    }
+
+    func deletePairingFile() {
+        if let url = findPairingFile() { try? FileManager.default.removeItem(at: url) }
+        pairingName = nil
+        isReady = false
+        status = "Pairing file removed."
+    }
+
+    private func excludeFromBackup(_ url: URL) {
+        var u = url
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? u.setResourceValues(values)
+    }
+
+    // MARK: Connection
+
+    func bootstrap() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        isReady = false
+
+        guard let url = findPairingFile(), let text = try? String(contentsOf: url, encoding: .utf8) else {
+            pairingName = nil
+            status = "No pairing file. Open Setup and choose one."
+            return
+        }
+        pairingName = url.lastPathComponent
+        excludeFromBackup(url)
+
+        let peer = overridePeer.trimmingCharacters(in: .whitespaces)
+        let core = Minimuxer.shared.core
+        let binding = ConnectionConfigBinding(
+            setTunnelIfaceIp: { _ in },
+            setTunnelPeerIp: { _ in },
+            setTunnelPeerSubnetMask: { _ in },
+            setTunnelPeerReachable: { _ in },
+            setTunnelIfaceSubnetMask: { _ in },
+            getRemoteServerIp: { "" },
+            setRemoteReachable: { _ in },
+            getOverrideTunnelPeerIp: { peer },
+            setOverrideTunnelPeerReachable: { _ in },
+            getConnectionMode: { .localVPN }
+        )
+
+        status = "Connecting..."
+        await core.bindConnectionConfig(binding)
+        do {
+            try await core.start(pairingFile: text, mountPath: docsURL.path, preferred: .rppairing)
+        } catch {
+            status = "Start failed: \(error)"
+            return
+        }
+
+        let ready = await core.isReady(withNetworkCheck: true, withDDIMountCheck: false)
+        if case .failure(let err) = ready {
+            status = "Not connected: \(core.describeError(err)). Is LocalDevVPN on?"
+            return
+        }
+
+        ddiMounted = try? await core.isDDIMounted()
+        isReady = true
+        status = ddiMounted == false ? "Connected. Developer image not mounted (see Setup)." : "Ready"
+    }
+
+    func mountDDI() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        message = "Mounting developer image (may take a minute)..."
+        do {
+            let didMount = try await Minimuxer.shared.core.mountDDI(docsPath: docsURL.path)
+            ddiMounted = true
+            message = didMount ? "Developer image mounted." : "It was already mounted."
+            if isReady { status = "Ready" }
+        } catch {
+            message = "Mount failed: \(error)"
+        }
+    }
+
+    // MARK: Teleport / hold
+
+    func teleport(to coordinate: CLLocationCoordinate2D) {
+        stopDrive()
+        current = coordinate
+        startTicker()
+    }
+
+    private func startTicker() {
+        ticker?.cancel()
+        holding = true
+        okCount = 0
+        failCount = 0
+        lastError = ""
+        if keepAlive { KeepAlive.shared.start() }
+        lastTick = Date()
+        ticker = Task { @MainActor in
+            while !Task.isCancelled {
+                let now = Date()
+                let dt = now.timeIntervalSince(self.lastTick)
+                self.lastTick = now
+                self.advance(dt: dt)
+                if let c = self.current { await self.send(c) }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
+    private func send(_ c: CLLocationCoordinate2D) async {
+        do {
+            try await Minimuxer.shared.core.setSimulatedLocation(latitude: c.latitude, longitude: c.longitude)
+            okCount += 1
+            lastError = ""
+        } catch {
+            failCount += 1
+            lastError = "\(error)"
+        }
+    }
+
+    func clearLocation() async {
+        ticker?.cancel()
+        await ticker?.value
+        ticker = nil
+        holding = false
+        driving = false
+        paused = false
+        route = []
+        current = nil
+        KeepAlive.shared.stop()
+        do {
+            try await Minimuxer.shared.core.clearSimulatedLocation()
+            message = "Real GPS restored."
+        } catch {
+            message = "Clear failed: \(error)"
+        }
+    }
+
+    // MARK: Driving
+
+    func startDrive(to destination: CLLocationCoordinate2D) async {
+        guard let start = current else {
+            message = "Teleport to a starting point first, then choose a destination."
+            return
+        }
+        busy = true
+        defer { busy = false }
+        message = "Finding a route..."
+
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
+        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
+        request.transportType = .automobile
+
+        do {
+            let response = try await MKDirections(request: request).calculate()
+            guard let best = response.routes.first else {
+                message = "No driving route found."
+                return
+            }
+            let points = best.polyline.coords
+            guard points.count > 1 else {
+                message = "Route was too short."
+                return
+            }
+            route = points
+            buildCumulative()
+            traveled = 0
+            paused = false
+            driving = true
+            message = ""
+            startTicker()
+        } catch {
+            message = "Route failed: \(error.localizedDescription)"
+        }
+    }
+
+    func stopDrive() {
+        driving = false
+        paused = false
+        route = []
+        traveled = 0
+    }
+
+    private func buildCumulative() {
+        cumulative = [0]
+        var total = 0.0
+        for i in 1..<route.count {
+            let a = CLLocation(latitude: route[i - 1].latitude, longitude: route[i - 1].longitude)
+            let b = CLLocation(latitude: route[i].latitude, longitude: route[i].longitude)
+            total += a.distance(from: b)
+            cumulative.append(total)
+        }
+        routeDistance = total
+    }
+
+    private func advance(dt: Double) {
+        guard driving, !paused, route.count > 1 else { return }
+        traveled += speedMph * 0.44704 * dt
+        if traveled >= routeDistance {
+            traveled = routeDistance
+            current = route.last
+            driving = false
+            message = "Arrived."
+            return
+        }
+        current = point(at: traveled)
+    }
+
+    private func point(at distance: Double) -> CLLocationCoordinate2D {
+        var lo = 0
+        var hi = cumulative.count - 1
+        while lo < hi - 1 {
+            let mid = (lo + hi) / 2
+            if cumulative[mid] <= distance { lo = mid } else { hi = mid }
+        }
+        let segment = cumulative[hi] - cumulative[lo]
+        let t = segment > 0 ? (distance - cumulative[lo]) / segment : 0
+        let a = route[lo]
+        let b = route[hi]
+        return CLLocationCoordinate2D(
+            latitude: a.latitude + (b.latitude - a.latitude) * t,
+            longitude: a.longitude + (b.longitude - a.longitude) * t
+        )
+    }
+}

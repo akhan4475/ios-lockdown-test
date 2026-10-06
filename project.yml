@@ -1,7 +1,7 @@
 name: LockdownTest
 options:
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
 packages:
   Minimuxer:
     path: Vendor/minimuxer
