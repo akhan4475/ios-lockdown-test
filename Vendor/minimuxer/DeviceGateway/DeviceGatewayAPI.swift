@@ -81,6 +81,9 @@ public protocol DeviceGatewayAPI: AnyObject, Sendable {
     func afcListDirectory(bundleId: String, path: String) async throws -> [String]
     func afcReadFile(bundleId: String, path: String) async throws -> Data
     func afcGetFileInfo(bundleId: String, path: String) async throws -> (isDirectory: Bool, fileSize: Int64)
+
+    func setSimulatedLocation(latitude: Double, longitude: Double) async throws
+    func clearSimulatedLocation() async throws
 }
 
 public extension DeviceGatewayAPI {
@@ -91,5 +94,13 @@ public extension DeviceGatewayAPI {
     // Active service port for the currently loaded pairing file mode
     var servicePort: UInt16 {
         getPort(for: pairingFileType)
+    }
+
+    func setSimulatedLocation(latitude: Double, longitude: Double) async throws {
+        throw DeviceGatewayError(.unsupportedOperation, reason: "location simulation")
+    }
+
+    func clearSimulatedLocation() async throws {
+        throw DeviceGatewayError(.unsupportedOperation, reason: "location simulation")
     }
 }

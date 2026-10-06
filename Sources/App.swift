@@ -25,6 +25,10 @@ struct ContentView: View {
     @State private var mmRunning = false
     @State private var ddiLog = "Not checked."
     @State private var ddiRunning = false
+    @State private var latText = "40.7580"
+    @State private var lonText = "-73.9855"
+    @State private var locLog = "Idle."
+    @State private var locRunning = false
 
     var body: some View {
         NavigationView {
@@ -64,6 +68,23 @@ struct ContentView: View {
                     }
                     .disabled(ddiRunning)
                     Text(ddiLog)
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+                Section("Location test (run Start, then mount the DDI first)") {
+                    TextField("Latitude", text: $latText)
+                        .keyboardType(.numbersAndPunctuation)
+                    TextField("Longitude", text: $lonText)
+                        .keyboardType(.numbersAndPunctuation)
+                    Button(locRunning ? "Working..." : "Set location") {
+                        Task { await setLocation() }
+                    }
+                    .disabled(locRunning)
+                    Button("Clear location (back to real GPS)") {
+                        Task { await clearLocation() }
+                    }
+                    .disabled(locRunning)
+                    Text(locLog)
                         .font(.system(.footnote, design: .monospaced))
                         .textSelection(.enabled)
                 }
@@ -141,6 +162,37 @@ struct ContentView: View {
             out += "\nfetchUDID failed: \(error)"
         }
         mmLog = out
+    }
+
+    @MainActor
+    private func setLocation() async {
+        guard let lat = Double(latText.trimmingCharacters(in: .whitespaces)),
+              let lon = Double(lonText.trimmingCharacters(in: .whitespaces)),
+              (-90.0...90.0).contains(lat), (-180.0...180.0).contains(lon) else {
+            locLog = "Enter a valid latitude (-90 to 90) and longitude (-180 to 180)."
+            return
+        }
+        locRunning = true
+        defer { locRunning = false }
+        locLog = "Setting \(lat), \(lon)..."
+        do {
+            try await Minimuxer.shared.core.setSimulatedLocation(latitude: lat, longitude: lon)
+            locLog = "Set OK: \(lat), \(lon). Check Apple Maps."
+        } catch {
+            locLog = "Set failed: \(error)"
+        }
+    }
+
+    @MainActor
+    private func clearLocation() async {
+        locRunning = true
+        defer { locRunning = false }
+        do {
+            try await Minimuxer.shared.core.clearSimulatedLocation()
+            locLog = "Cleared. Real GPS restored."
+        } catch {
+            locLog = "Clear failed: \(error)"
+        }
     }
 
     @MainActor

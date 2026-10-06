@@ -107,6 +107,8 @@ public protocol MinimuxerAPI: AnyObject {
     func isDDIMounted() async throws -> Bool
 
     func fetchUDID() async throws -> String
+    func setSimulatedLocation(latitude: Double, longitude: Double) async throws
+    func clearSimulatedLocation() async throws
     func testDeviceConnection(ifaddr: String, timeout: Int) -> Bool
 
     func sendIpaAfc(bundleId: String, ipaBytes: Data) async throws

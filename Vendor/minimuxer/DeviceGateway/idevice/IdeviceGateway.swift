@@ -75,6 +75,8 @@ public final class IdeviceGateway: BaseDeviceGateway, DeviceGatewayAPI, @uncheck
     private var pairingFile: OpaquePointer? = nil
     private var adapter: OpaquePointer? = nil
     private var handshake: OpaquePointer? = nil
+    fileprivate var locServer: OpaquePointer? = nil
+    fileprivate var locSim: OpaquePointer? = nil
 
     public override init() {
         try! super.init()
@@ -86,6 +88,7 @@ public final class IdeviceGateway: BaseDeviceGateway, DeviceGatewayAPI, @uncheck
 
     public override func cleanup() {
         debugLog("[IdeviceGateway] cleanup() called")
+        teardownLocationSession()
         if let pairingFile = self.pairingFile {
             verboseLog("[IdeviceGateway] cleanup() freeing pairingFile")
             if pairingFileType == .rppairing {
@@ -109,6 +112,7 @@ public final class IdeviceGateway: BaseDeviceGateway, DeviceGatewayAPI, @uncheck
 
     public override func invalidateConnection() {
         debugLog("[IdeviceGateway] invalidateConnection() called - clearing stale adapter and handshake")
+        teardownLocationSession()
         if let handshake = handshake {
             rsd_handshake_free(handshake)
             self.handshake = nil
@@ -2460,6 +2464,73 @@ extension IdeviceGateway {
     public func wipeContainer(identifier: String) async throws {
         try await withFFIDispatch {
             try self.syncWipeContainer(identifier: identifier)
+        }
+    }
+}
+
+
+// MARK: - Location simulation (local addition, not in upstream)
+extension IdeviceGateway {
+    fileprivate func teardownLocationSession() {
+        if let sim = locSim { location_simulation_free(sim) }
+        if let server = locServer { remote_server_free(server) }
+        locSim = nil
+        locServer = nil
+    }
+
+    fileprivate func locationError(_ err: UnsafeMutablePointer<IdeviceFfiError>, _ what: String) -> IdeviceGatewayError {
+        var msg = "Error code \(err.pointee.code)"
+        if let msgPtr = err.pointee.message {
+            msg = String(cString: msgPtr).cleanedErrorFormatting
+        }
+        let addr = Int(bitPattern: err)
+        if addr > 0xff { idevice_error_free(err) }
+        return IdeviceGatewayError(.serviceError, reason: "\(what): \(msg)")
+    }
+
+    fileprivate func syncSetLocation(latitude: Double, longitude: Double) throws {
+        try verifyInitialized()
+        guard pairingFileType == .rppairing else {
+            throw IdeviceGatewayError(.unsupportedOperation, reason: "location simulation (needs an RPPairing file)")
+        }
+        if locSim == nil {
+            try ensureRPConnection()
+            var server: OpaquePointer? = nil
+            if let err = remote_server_connect_rsd(adapter, handshake, &server) {
+                invalidateConnection()
+                throw locationError(err, "Could not open developer connection")
+            }
+            var sim: OpaquePointer? = nil
+            if let err = location_simulation_new(server, &sim) {
+                remote_server_free(server)
+                throw locationError(err, "Could not start location simulation")
+            }
+            locServer = server
+            locSim = sim
+        }
+        if let err = location_simulation_set(locSim, latitude, longitude) {
+            let failure = locationError(err, "Could not set location")
+            teardownLocationSession()
+            throw failure
+        }
+    }
+
+    fileprivate func syncClearLocation() throws {
+        guard let sim = locSim else { return }
+        let err = location_simulation_clear(sim)
+        teardownLocationSession()
+        if let err = err { throw locationError(err, "Could not clear location") }
+    }
+
+    public func setSimulatedLocation(latitude: Double, longitude: Double) async throws {
+        try await withFFIDispatch {
+            try self.syncSetLocation(latitude: latitude, longitude: longitude)
+        }
+    }
+
+    public func clearSimulatedLocation() async throws {
+        try await withFFIDispatch {
+            try self.syncClearLocation()
         }
     }
 }

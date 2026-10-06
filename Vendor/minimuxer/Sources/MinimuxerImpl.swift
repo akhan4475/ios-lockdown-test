@@ -418,6 +418,14 @@ final internal class MinimuxerImpl: MinimuxerAPI {
         }
     }
 
+    func setSimulatedLocation(latitude: Double, longitude: Double) async throws {
+        try await self.gateway.setSimulatedLocation(latitude: latitude, longitude: longitude)
+    }
+
+    func clearSimulatedLocation() async throws {
+        try await self.gateway.clearSimulatedLocation()
+    }
+
     func sendIpaAfc(bundleId: String, ipaBytes: Data) async throws(MinimuxerError) {
         try await runWithChecks("while sending IPA via AFC", catchAll: MinimuxerError.rwAfc) {
             try await self.gateway.sendIpaAfc(bundleId: bundleId, ipaBytes: ipaBytes)
