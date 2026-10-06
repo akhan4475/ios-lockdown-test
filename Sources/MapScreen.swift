@@ -270,7 +270,7 @@ struct MapScreen: View {
                     Label("Drive there", systemImage: "car.fill").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .disabled(!engine.isReady || engine.current == nil || engine.busy)
+                .disabled(!engine.isReady || engine.ddiMounted == false || engine.busy)
 
                 Button {
                     saved.add(name: pin.title, coordinate: pin.coordinate)

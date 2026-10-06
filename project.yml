@@ -20,6 +20,7 @@ targets:
         CFBundleDisplayName: Lockdown Test
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
+        NSLocationWhenInUseUsageDescription: Used only to start a simulated drive from your real position.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         NSLocalNetworkUsageDescription: Probes the on-device loopback tunnel for testing.

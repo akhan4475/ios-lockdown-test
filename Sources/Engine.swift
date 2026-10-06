@@ -58,6 +58,7 @@ final class LocationEngine: ObservableObject {
     private var ticker: Task<Void, Never>?
     private var cumulative: [Double] = []
     private var lastTick = Date()
+    private let realLocation = RealLocation()
     private var destName = ""
     private var lastSave = Date.distantPast
     private let lastKey = "lastLocation.v1"
@@ -250,12 +251,20 @@ final class LocationEngine: ObservableObject {
     // MARK: Driving
 
     func planDrive(to destination: CLLocationCoordinate2D, name: String) async {
-        guard let start = current else {
-            message = "Teleport to a starting point first, then choose a destination."
-            return
-        }
         busy = true
         defer { busy = false }
+
+        let start: CLLocationCoordinate2D
+        if let c = current {
+            start = c
+        } else {
+            message = "Reading your real location..."
+            guard let real = await realLocation.fetch() else {
+                message = "Could not read your real location. Allow Location for this app in Settings, or Set location somewhere first."
+                return
+            }
+            start = real
+        }
         message = "Finding routes..."
 
         let request = MKDirections.Request()
@@ -305,6 +314,7 @@ final class LocationEngine: ObservableObject {
     func beginDrive() {
         guard plans.indices.contains(selectedPlan) else { return }
         route = plans[selectedPlan].coords
+        if current == nil { current = route.first }
         plans = []
         buildCumulative()
         traveled = 0
