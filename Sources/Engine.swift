@@ -11,6 +11,21 @@ extension MKPolyline {
     }
 }
 
+struct LastLocation: Codable {
+    var lat: Double
+    var lon: Double
+    var name: String
+}
+
+struct PlannedRoute: Identifiable {
+    let id = UUID()
+    let name: String
+    let coords: [CLLocationCoordinate2D]
+    let distance: Double
+    let eta: Double
+    var avgMph: Double { eta > 0 ? distance / eta / 0.44704 : 30 }
+}
+
 @MainActor
 final class LocationEngine: ObservableObject {
     @Published var status = "Starting..."
@@ -29,6 +44,10 @@ final class LocationEngine: ObservableObject {
     @Published var paused = false
     @Published var speedMph: Double = 45
 
+    @Published var plans: [PlannedRoute] = []
+    @Published var selectedPlan = 0
+    @Published var lastLocation: LastLocation?
+
     @Published var okCount = 0
     @Published var failCount = 0
     @Published var lastError = ""
@@ -39,6 +58,16 @@ final class LocationEngine: ObservableObject {
     private var ticker: Task<Void, Never>?
     private var cumulative: [Double] = []
     private var lastTick = Date()
+    private var destName = ""
+    private var lastSave = Date.distantPast
+    private let lastKey = "lastLocation.v1"
+
+    init() {
+        if let data = UserDefaults.standard.data(forKey: lastKey),
+           let decoded = try? JSONDecoder().decode(LastLocation.self, from: data) {
+            lastLocation = decoded
+        }
+    }
 
     private var docsURL: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -147,10 +176,25 @@ final class LocationEngine: ObservableObject {
 
     // MARK: Teleport / hold
 
-    func teleport(to coordinate: CLLocationCoordinate2D) {
+    func teleport(to coordinate: CLLocationCoordinate2D, name: String = "Teleported location") {
         stopDrive()
+        cancelPlan()
         current = coordinate
+        remember(coordinate, name: name)
         startTicker()
+    }
+
+    func resumeLast() {
+        guard let last = lastLocation else { return }
+        teleport(to: CLLocationCoordinate2D(latitude: last.lat, longitude: last.lon), name: last.name)
+    }
+
+    private func remember(_ c: CLLocationCoordinate2D, name: String) {
+        let last = LastLocation(lat: c.latitude, lon: c.longitude, name: name)
+        lastLocation = last
+        if let data = try? JSONEncoder().encode(last) {
+            UserDefaults.standard.set(data, forKey: lastKey)
+        }
     }
 
     private func startTicker() {
@@ -192,6 +236,7 @@ final class LocationEngine: ObservableObject {
         driving = false
         paused = false
         route = []
+        plans = []
         current = nil
         KeepAlive.shared.stop()
         do {
@@ -204,41 +249,69 @@ final class LocationEngine: ObservableObject {
 
     // MARK: Driving
 
-    func startDrive(to destination: CLLocationCoordinate2D) async {
+    func planDrive(to destination: CLLocationCoordinate2D, name: String) async {
         guard let start = current else {
             message = "Teleport to a starting point first, then choose a destination."
             return
         }
         busy = true
         defer { busy = false }
-        message = "Finding a route..."
+        message = "Finding routes..."
 
         let request = MKDirections.Request()
         request.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
         request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
         request.transportType = .automobile
+        request.requestsAlternateRoutes = true
 
         do {
             let response = try await MKDirections(request: request).calculate()
-            guard let best = response.routes.first else {
+            var list: [PlannedRoute] = []
+            for r in response.routes.prefix(3) {
+                let pts = r.polyline.coords
+                if pts.count > 1 {
+                    list.append(PlannedRoute(name: r.name, coords: pts, distance: r.distance, eta: r.expectedTravelTime))
+                }
+            }
+            guard !list.isEmpty else {
                 message = "No driving route found."
                 return
             }
-            let points = best.polyline.coords
-            guard points.count > 1 else {
-                message = "Route was too short."
-                return
-            }
-            route = points
-            buildCumulative()
-            traveled = 0
-            paused = false
-            driving = true
+            plans = list
+            selectedPlan = 0
+            speedMph = clampedSpeed(list[0].avgMph)
+            destName = name
             message = ""
-            startTicker()
         } catch {
             message = "Route failed: \(error.localizedDescription)"
         }
+    }
+
+    func selectPlan(_ index: Int) {
+        guard plans.indices.contains(index) else { return }
+        selectedPlan = index
+        speedMph = clampedSpeed(plans[index].avgMph)
+    }
+
+    func useRouteAverage() {
+        guard plans.indices.contains(selectedPlan) else { return }
+        speedMph = clampedSpeed(plans[selectedPlan].avgMph)
+    }
+
+    func cancelPlan() {
+        plans = []
+    }
+
+    func beginDrive() {
+        guard plans.indices.contains(selectedPlan) else { return }
+        route = plans[selectedPlan].coords
+        plans = []
+        buildCumulative()
+        traveled = 0
+        paused = false
+        driving = true
+        message = ""
+        startTicker()
     }
 
     func stopDrive() {
@@ -246,6 +319,10 @@ final class LocationEngine: ObservableObject {
         paused = false
         route = []
         traveled = 0
+    }
+
+    private func clampedSpeed(_ mph: Double) -> Double {
+        min(max(mph.rounded(), 5), 90)
     }
 
     private func buildCumulative() {
@@ -265,12 +342,20 @@ final class LocationEngine: ObservableObject {
         traveled += speedMph * 0.44704 * dt
         if traveled >= routeDistance {
             traveled = routeDistance
-            current = route.last
+            if let end = route.last {
+                current = end
+                remember(end, name: destName.isEmpty ? "Destination" : destName)
+            }
             driving = false
             message = "Arrived."
             return
         }
-        current = point(at: traveled)
+        let here = point(at: traveled)
+        current = here
+        if Date().timeIntervalSince(lastSave) > 5 {
+            lastSave = Date()
+            remember(here, name: destName.isEmpty ? "Last drive position" : "On the way to \(destName)")
+        }
     }
 
     private func point(at distance: Double) -> CLLocationCoordinate2D {

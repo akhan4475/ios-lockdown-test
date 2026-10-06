@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import UIKit
 
 struct Pin: Identifiable {
     let id = UUID()
@@ -46,6 +47,10 @@ struct MapScreen: View {
         .onChange(of: engine.driving) { _, isDriving in
             if isDriving { follow = true }
         }
+        .onChange(of: engine.selectedPlan) { _, _ in fitPlans() }
+        .onChange(of: engine.plans.count) { _, count in
+            if count > 0 { follow = false; fitPlans() }
+        }
     }
 
     // MARK: Map
@@ -56,8 +61,14 @@ struct MapScreen: View {
                 if let pin {
                     Marker(pin.title, coordinate: pin.coordinate).tint(.red)
                 }
-                if engine.route.count > 1 {
-                    MapPolyline(coordinates: engine.route).stroke(.blue, lineWidth: 5)
+                if !engine.plans.isEmpty {
+                    ForEach(Array(engine.plans.enumerated()), id: \.element.id) { idx, plan in
+                        MapPolyline(coordinates: plan.coords)
+                            .stroke(idx == engine.selectedPlan ? Color.blue : Color.gray.opacity(0.7),
+                                    lineWidth: idx == engine.selectedPlan ? 6 : 4)
+                    }
+                } else if engine.route.count > 1 {
+                    MapPolyline(coordinates: engine.route).stroke(Color.blue, lineWidth: 6)
                 }
                 if let c = engine.current {
                     Annotation("You", coordinate: c) {
@@ -69,13 +80,35 @@ struct MapScreen: View {
                     }
                 }
             }
+            .mapStyle(.standard)
             .mapControls { MapCompass(); MapScaleView() }
-            .onTapGesture { point in
-                searchFocused = false
-                if let c = proxy.convert(point, from: .local) { select(coordinate: c) }
-            }
+            .onTapGesture { searchFocused = false }
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.5)
+                    .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+                    .onEnded { value in
+                        if case .second(true, let drag?) = value,
+                           let c = proxy.convert(drag.location, from: .local) {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            searchFocused = false
+                            select(coordinate: c)
+                        }
+                    }
+            )
         }
         .ignoresSafeArea()
+    }
+
+    private func fitPlans() {
+        guard engine.plans.indices.contains(engine.selectedPlan) else { return }
+        var rect = MKMapRect.null
+        for c in engine.plans[engine.selectedPlan].coords {
+            let p = MKMapPoint(c)
+            rect = rect.union(MKMapRect(origin: p, size: MKMapSize(width: 0, height: 0)))
+        }
+        guard !rect.isNull else { return }
+        let padded = rect.insetBy(dx: -rect.width * 0.25 - 500, dy: -rect.height * 0.35 - 500)
+        withAnimation { camera = .rect(padded) }
     }
 
     // MARK: Top
@@ -149,78 +182,148 @@ struct MapScreen: View {
     // MARK: Bottom card
 
     private var bottomCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if engine.driving || engine.paused || engine.route.count > 1 {
-                driveControls
-            }
-
-            if let pin {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(pin.title).font(.headline).lineLimit(2)
-                    if !pin.subtitle.isEmpty { Text(pin.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
-                    Text(String(format: "%.5f, %.5f", pin.coordinate.latitude, pin.coordinate.longitude))
-                        .font(.caption2.monospaced()).foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                if !engine.plans.isEmpty {
+                    planCard
+                } else if engine.driving || engine.paused || engine.route.count > 1 {
+                    driveControls
                 }
-                HStack(spacing: 8) {
+
+                if let pin, engine.plans.isEmpty {
+                    pinCard(pin)
+                } else if engine.current == nil && engine.plans.isEmpty {
+                    Text("Search for a place, or press and hold on the map to drop a pin.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+
+                if !engine.holding, engine.plans.isEmpty, let last = engine.lastLocation {
                     Button {
-                        engine.teleport(to: pin.coordinate)
+                        engine.resumeLast()
                         follow = true
                     } label: {
-                        Label("Teleport", systemImage: "location.fill").frame(maxWidth: .infinity)
+                        Label("Resume last location: \(last.name)", systemImage: "arrow.counterclockwise")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .lineLimit(2)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .disabled(!engine.isReady || engine.ddiMounted == false)
-
-                    Button {
-                        Task { await engine.startDrive(to: pin.coordinate) }
-                    } label: {
-                        Label("Drive", systemImage: "car.fill").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!engine.isReady || engine.current == nil || engine.busy)
-
-                    Button {
-                        saved.add(name: pin.title, coordinate: pin.coordinate)
-                        engine.message = "Saved."
-                    } label: {
-                        Image(systemName: "star")
-                    }
-                    .buttonStyle(.bordered)
                 }
-            } else if engine.current == nil {
-                Text("Search for a place or tap the map to drop a pin.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
 
-            if engine.ddiMounted == false && engine.isReady {
-                Button("Mount developer image (needed once per restart)") { showSetup = true }
-                    .font(.footnote.weight(.semibold))
-            }
-
-            if engine.holding {
-                HStack {
-                    Text("Holding. ok \(engine.okCount)  failed \(engine.failCount)")
-                        .font(.caption2.monospaced()).foregroundStyle(.secondary)
-                    Spacer()
-                    Button(role: .destructive) {
-                        Task { await engine.clearLocation() }
-                    } label: {
-                        Text("Clear location").font(.footnote.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
+                if engine.ddiMounted == false && engine.isReady {
+                    Button("Mount developer image (needed once per restart)") { showSetup = true }
+                        .font(.footnote.weight(.semibold))
                 }
-                if !engine.lastError.isEmpty {
-                    Text(engine.lastError).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+
+                if engine.holding {
+                    HStack {
+                        Text("Holding. ok \(engine.okCount)  failed \(engine.failCount)")
+                            .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                        Spacer()
+                        Button(role: .destructive) {
+                            Task { await engine.clearLocation() }
+                        } label: {
+                            Text("Clear location").font(.footnote.weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    if !engine.lastError.isEmpty {
+                        Text(engine.lastError).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+                    }
+                }
+
+                if !engine.message.isEmpty {
+                    Text(engine.message).font(.caption).foregroundStyle(.secondary)
                 }
             }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxHeight: 360)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
 
-            if !engine.message.isEmpty {
-                Text(engine.message).font(.caption).foregroundStyle(.secondary)
+    private func pinCard(_ pin: Pin) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pin.title).font(.headline).lineLimit(2)
+                if !pin.subtitle.isEmpty {
+                    Text(pin.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Text(String(format: "%.5f, %.5f", pin.coordinate.latitude, pin.coordinate.longitude))
+                    .font(.caption2.monospaced()).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Button {
+                    engine.teleport(to: pin.coordinate, name: pin.title)
+                    follow = true
+                } label: {
+                    Label("Set location", systemImage: "location.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!engine.isReady || engine.ddiMounted == false)
+
+                Button {
+                    Task { await engine.planDrive(to: pin.coordinate, name: pin.title) }
+                } label: {
+                    Label("Drive there", systemImage: "car.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!engine.isReady || engine.current == nil || engine.busy)
+
+                Button {
+                    saved.add(name: pin.title, coordinate: pin.coordinate)
+                    engine.message = "Saved."
+                } label: {
+                    Image(systemName: "star")
+                }
+                .buttonStyle(.bordered)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var planCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Choose a route").font(.subheadline.weight(.semibold))
+            ForEach(Array(engine.plans.enumerated()), id: \.element.id) { idx, plan in
+                Button {
+                    engine.selectPlan(idx)
+                } label: {
+                    HStack(alignment: .top) {
+                        Image(systemName: idx == engine.selectedPlan ? "largecircle.fill.circle" : "circle")
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(plan.name.isEmpty ? "Route \(idx + 1)" : "Via \(plan.name)").font(.subheadline)
+                            Text(String(format: "%.1f mi  -  %d min  -  avg %d mph",
+                                        plan.distance / 1609.344,
+                                        Int((plan.eta / 60).rounded()),
+                                        Int(plan.avgMph.rounded())))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            HStack {
+                Text("\(Int(engine.speedMph)) mph").font(.caption.monospaced()).frame(width: 60, alignment: .leading)
+                Slider(value: $engine.speedMph, in: 5...90, step: 1)
+            }
+            HStack(spacing: 8) {
+                Button("Use route average") { engine.useRouteAverage() }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Cancel") { engine.cancelPlan() }
+                    .buttonStyle(.bordered)
+                Button {
+                    engine.beginDrive()
+                    follow = true
+                } label: {
+                    Label("Start drive", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
     }
 
     private var driveControls: some View {
@@ -235,7 +338,7 @@ struct MapScreen: View {
             ProgressView(value: engine.routeDistance > 0 ? engine.traveled / engine.routeDistance : 0)
             HStack {
                 Text("\(Int(engine.speedMph)) mph").font(.caption.monospaced()).frame(width: 60, alignment: .leading)
-                Slider(value: $engine.speedMph, in: 5...90, step: 5)
+                Slider(value: $engine.speedMph, in: 5...90, step: 1)
             }
             HStack(spacing: 8) {
                 Button {
@@ -310,6 +413,7 @@ struct MapScreen: View {
     private func select(coordinate: CLLocationCoordinate2D) {
         let placeholder = Pin(title: "Dropped pin", subtitle: "", coordinate: coordinate)
         pin = placeholder
+        follow = false
         let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         Task {
             guard let mark = try? await CLGeocoder().reverseGeocodeLocation(location).first else { return }

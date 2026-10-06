@@ -8,6 +8,7 @@ struct LockdownTestApp: App {
         WindowGroup {
             MapScreen()
                 .environmentObject(engine)
+                .preferredColorScheme(.light)
                 .task { await engine.bootstrap() }
         }
     }
