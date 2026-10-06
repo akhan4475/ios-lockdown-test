@@ -86,7 +86,7 @@ struct ContentView: View {
         defer { mmRunning = false }
 
         let peer = overridePeer.trimmingCharacters(in: .whitespaces)
-        let proto: PairingProtocol = useRP ? .rppairing : .lockdown
+        let rp = useRP
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
         let core = Minimuxer.shared.core
 
@@ -106,9 +106,9 @@ struct ContentView: View {
         mmLog = "Binding connection config..."
         await core.bindConnectionConfig(binding)
 
-        mmLog = "Starting (\(proto))..."
+        mmLog = "Starting (\(rp ? "rppairing" : "lockdown"))..."
         do {
-            try await core.start(pairingFile: text, mountPath: docs, preferred: proto)
+            try await core.start(pairingFile: text, mountPath: docs, preferred: rp ? .rppairing : .lockdown)
         } catch {
             mmLog = "start() failed: \(error)"
             return
