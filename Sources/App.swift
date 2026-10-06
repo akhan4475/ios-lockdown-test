@@ -29,6 +29,8 @@ struct ContentView: View {
     @State private var lonText = "-73.9855"
     @State private var locLog = "Idle."
     @State private var locRunning = false
+    @State private var keepAlive = true
+    @State private var holdTask: Task<Void, Never>?
 
     var body: some View {
         NavigationView {
@@ -76,7 +78,8 @@ struct ContentView: View {
                         .keyboardType(.numbersAndPunctuation)
                     TextField("Longitude", text: $lonText)
                         .keyboardType(.numbersAndPunctuation)
-                    Button(locRunning ? "Working..." : "Set location") {
+                    Toggle("Keep alive in background (silent audio)", isOn: $keepAlive)
+                    Button(locRunning ? "Working..." : "Set + hold location") {
                         Task { await setLocation() }
                     }
                     .disabled(locRunning)
@@ -174,19 +177,54 @@ struct ContentView: View {
         }
         locRunning = true
         defer { locRunning = false }
+        await stopHolding()
         locLog = "Setting \(lat), \(lon)..."
         do {
             try await Minimuxer.shared.core.setSimulatedLocation(latitude: lat, longitude: lon)
-            locLog = "Set OK: \(lat), \(lon). Check Apple Maps."
         } catch {
             locLog = "Set failed: \(error)"
+            return
         }
+        startHolding(lat: lat, lon: lon)
+    }
+
+    @MainActor
+    private func startHolding(lat: Double, lon: Double) {
+        if keepAlive { KeepAlive.shared.start() }
+        let start = Date()
+        holdTask = Task { @MainActor in
+            var ok = 0
+            var failed = 0
+            var lastError = ""
+            while !Task.isCancelled {
+                do {
+                    try await Minimuxer.shared.core.setSimulatedLocation(latitude: lat, longitude: lon)
+                    ok += 1
+                } catch {
+                    failed += 1
+                    lastError = "\(error)"
+                }
+                let secs = Int(Date().timeIntervalSince(start))
+                locLog = "Holding \(lat), \(lon)\nrunning \(secs)s  ok: \(ok)  failed: \(failed)"
+                    + (lastError.isEmpty ? "" : "\nlast error: \(lastError)")
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
+    @MainActor
+    private func stopHolding() async {
+        holdTask?.cancel()
+        await holdTask?.value
+        holdTask = nil
+        KeepAlive.shared.stop()
     }
 
     @MainActor
     private func clearLocation() async {
         locRunning = true
         defer { locRunning = false }
+        await stopHolding()
         do {
             try await Minimuxer.shared.core.clearSimulatedLocation()
             locLog = "Cleared. Real GPS restored."

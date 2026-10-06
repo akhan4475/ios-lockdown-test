@@ -19,6 +19,7 @@ targets:
       properties:
         CFBundleDisplayName: Lockdown Test
         UILaunchScreen: {}
+        UIBackgroundModes: [audio]
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         NSLocalNetworkUsageDescription: Probes the on-device loopback tunnel for testing.
