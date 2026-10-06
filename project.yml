@@ -2,12 +2,19 @@ name: LockdownTest
 options:
   deploymentTarget:
     iOS: "16.0"
+packages:
+  Minimuxer:
+    url: https://github.com/SideStore/minimuxer
+    revision: 12be70dc2627307a16bfd2dc7a009080d5bec909
 targets:
   LockdownTest:
     type: application
     platform: iOS
     sources:
       - Sources
+    dependencies:
+      - package: Minimuxer
+        product: Minimuxer
     info:
       path: Resources/Info.plist
       properties:

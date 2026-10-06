@@ -32,6 +32,11 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build
 
+      - name: Record resolved dependency versions
+        run: |
+          cp LockdownTest.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved Package.resolved
+          cat Package.resolved
+
       - name: Package IPA
         run: |
           mkdir Payload
@@ -41,4 +46,6 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: LockdownTest-unsigned-ipa
-          path: LockdownTest.ipa
+          path: |
+            LockdownTest.ipa
+            Package.resolved

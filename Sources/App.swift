@@ -1,5 +1,7 @@
 import SwiftUI
 import Network
+import UniformTypeIdentifiers
+import Minimuxer
 
 @main
 struct LockdownTestApp: App {
@@ -14,10 +16,18 @@ struct ContentView: View {
     @State private var log = "Idle."
     @State private var running = false
 
+    @State private var pairingText: String?
+    @State private var pairingName = "none loaded"
+    @State private var showImporter = false
+    @State private var useRP = true
+    @State private var overridePeer = ""
+    @State private var mmLog = "Idle."
+    @State private var mmRunning = false
+
     var body: some View {
         NavigationView {
             Form {
-                Section("Target") {
+                Section("TCP probe") {
                     TextField("Host", text: $host)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
@@ -25,15 +35,99 @@ struct ContentView: View {
                         .keyboardType(.numberPad)
                     Button(running ? "Probing..." : "Probe TCP connection") { probe() }
                         .disabled(running)
-                }
-                Section("Result") {
                     Text(log)
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+                Section("Minimuxer (LocalDevVPN must be connected)") {
+                    Button("Choose pairing file") { showImporter = true }
+                    Text("Pairing file: \(pairingName)").font(.footnote)
+                    Toggle("RPPairing file (iOS 17+)", isOn: $useRP)
+                    TextField("Override tunnel peer IP (optional)", text: $overridePeer)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    Button(mmRunning ? "Working..." : "Start + fetch UDID") {
+                        Task { await runMinimuxer() }
+                    }
+                    .disabled(mmRunning || pairingText == nil)
+                    Text(mmLog)
                         .font(.system(.footnote, design: .monospaced))
                         .textSelection(.enabled)
                 }
             }
             .navigationTitle("Lockdown Test")
+            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.item]) { result in
+                loadPairingFile(result)
+            }
         }
+    }
+
+    private func loadPairingFile(_ result: Result<URL, Error>) {
+        switch result {
+        case .failure(let e):
+            mmLog = "File pick failed: \(e.localizedDescription)"
+        case .success(let url):
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            do {
+                pairingText = try String(contentsOf: url, encoding: .utf8)
+                pairingName = url.lastPathComponent
+                mmLog = "Pairing file loaded in memory only."
+            } catch {
+                mmLog = "Could not read file: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    @MainActor
+    private func runMinimuxer() async {
+        guard let text = pairingText else { return }
+        mmRunning = true
+        defer { mmRunning = false }
+
+        let peer = overridePeer.trimmingCharacters(in: .whitespaces)
+        let proto: PairingProtocol = useRP ? .rppairing : .lockdown
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
+        let core = Minimuxer.shared.core
+
+        let binding = ConnectionConfigBinding(
+            setTunnelIfaceIp: { _ in },
+            setTunnelPeerIp: { _ in },
+            setTunnelPeerSubnetMask: { _ in },
+            setTunnelPeerReachable: { _ in },
+            setTunnelIfaceSubnetMask: { _ in },
+            getRemoteServerIp: { "" },
+            setRemoteReachable: { _ in },
+            getOverrideTunnelPeerIp: { peer },
+            setOverrideTunnelPeerReachable: { _ in },
+            getConnectionMode: { .localVPN }
+        )
+
+        mmLog = "Binding connection config..."
+        await core.bindConnectionConfig(binding)
+
+        mmLog = "Starting (\(proto))..."
+        do {
+            try await core.start(pairingFile: text, mountPath: docs, preferred: proto)
+        } catch {
+            mmLog = "start() failed: \(error)"
+            return
+        }
+
+        let ready = await core.isReady(withNetworkCheck: true, withDDIMountCheck: false)
+        var out = "isReady: "
+        switch ready {
+        case .success(let ok): out += "\(ok)"
+        case .failure(let err): out += "FAILED - \(core.describeError(err))"
+        }
+
+        do {
+            let udid = try await core.fetchUDID()
+            out += "\nUDID fetched OK (\(udid.count) chars)"
+        } catch {
+            out += "\nfetchUDID failed: \(error)"
+        }
+        mmLog = out
     }
 
     private func probe() {
