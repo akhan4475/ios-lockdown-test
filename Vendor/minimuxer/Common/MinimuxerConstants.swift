@@ -30,9 +30,9 @@ public enum MinimuxerConstants {
     public static let usbmuxdEnvKey = "USBMUXD_SOCKET_ADDRESS"
 
     public static let pre17VersionsURL  = "https://raw.githubusercontent.com/jkcoxson/JitStreamer/master/versions.json"
-    public static let ddiImageURL       = "https://raw.githubusercontent.com/doronz88/DeveloperDiskImage/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Personalized/Image.dmg"
-    public static let ddiTrustcacheURL  = "https://raw.githubusercontent.com/doronz88/DeveloperDiskImage/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Personalized/Image.dmg.trustcache"
-    public static let ddiManifestURL    = "https://raw.githubusercontent.com/doronz88/DeveloperDiskImage/refs/heads/main/PersonalizedImages/Xcode_iOS_DDI_Personalized/BuildManifest.plist"
+    public static let ddiImageURL       = "https://raw.githubusercontent.com/doronz88/DeveloperDiskImage/9fa2d08e75084c0ea0f27575e2e4b47399056933/PersonalizedImages/Xcode_iOS_DDI_Personalized/Image.dmg"
+    public static let ddiTrustcacheURL  = "https://raw.githubusercontent.com/doronz88/DeveloperDiskImage/9fa2d08e75084c0ea0f27575e2e4b47399056933/PersonalizedImages/Xcode_iOS_DDI_Personalized/Image.dmg.trustcache"
+    public static let ddiManifestURL    = "https://raw.githubusercontent.com/doronz88/DeveloperDiskImage/9fa2d08e75084c0ea0f27575e2e4b47399056933/PersonalizedImages/Xcode_iOS_DDI_Personalized/BuildManifest.plist"
 
     // WirelessPair Constants
     public static let defaultHostName = "SideStore"

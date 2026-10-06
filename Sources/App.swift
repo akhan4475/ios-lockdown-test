@@ -23,6 +23,8 @@ struct ContentView: View {
     @State private var overridePeer = ""
     @State private var mmLog = "Idle."
     @State private var mmRunning = false
+    @State private var ddiLog = "Not checked."
+    @State private var ddiRunning = false
 
     var body: some View {
         NavigationView {
@@ -51,6 +53,17 @@ struct ContentView: View {
                     }
                     .disabled(mmRunning || pairingText == nil)
                     Text(mmLog)
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+                Section("Developer disk image (run Start first)") {
+                    Button("Check if mounted") { Task { await checkDDI() } }
+                        .disabled(ddiRunning)
+                    Button(ddiRunning ? "Working..." : "Mount (downloads ~18 MB)") {
+                        Task { await mountDDI() }
+                    }
+                    .disabled(ddiRunning)
+                    Text(ddiLog)
                         .font(.system(.footnote, design: .monospaced))
                         .textSelection(.enabled)
                 }
@@ -128,6 +141,32 @@ struct ContentView: View {
             out += "\nfetchUDID failed: \(error)"
         }
         mmLog = out
+    }
+
+    @MainActor
+    private func checkDDI() async {
+        ddiRunning = true
+        defer { ddiRunning = false }
+        do {
+            let mounted = try await Minimuxer.shared.core.isDDIMounted()
+            ddiLog = "DDI mounted: \(mounted)"
+        } catch {
+            ddiLog = "Check failed: \(error)"
+        }
+    }
+
+    @MainActor
+    private func mountDDI() async {
+        ddiRunning = true
+        defer { ddiRunning = false }
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
+        ddiLog = "Mounting (may take a minute)..."
+        do {
+            let didMount = try await Minimuxer.shared.core.mountDDI(docsPath: docs)
+            ddiLog = didMount ? "Mounted now." : "Was already mounted."
+        } catch {
+            ddiLog = "Mount failed: \(error)"
+        }
     }
 
     private func probe() {
