@@ -14,7 +14,7 @@ env:
 
 jobs:
   idevice:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     steps:
       - name: Restore cached xcframework
         id: cache
@@ -64,7 +64,7 @@ jobs:
 
   build:
     needs: idevice
-    runs-on: macos-15
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
