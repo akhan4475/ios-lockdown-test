@@ -98,6 +98,28 @@ final internal class NetworkObserverService: NetworkObserverAPI, @unchecked Send
         }
         
         let connectionMode = await manager.getPreferredConnectionMode()
+        // Keep the established endpoint if it still belongs to a current local
+        // VPN route. manager.refresh() probes a fresh discovery connection;
+        // failure there is not evidence that our existing RPPairing session died.
+        // Clearing the endpoint calls invalidateConnection(), which frees the
+        // location client, RSD handshake and adapter. The actual location sends
+        // remain responsible for reporting transport failures.
+        let currentPeer = try? await self.endpoint.ip()
+        let remotePairing = await manager.gateway.pairingFileType == .rppairing
+        let overridePeer = await manager.overridePeerIp
+        let candidatePeers = DeviceConnectionManager.resolveCandidatePeers(
+            from: NetworkIfaceScanner.scan(quiet: true)
+        ).map { $0.ip }
+        if (overridePeer == nil || overridePeer == currentPeer),
+           EndpointRetentionPolicy.shouldRetain(
+            localVPN: connectionMode == .localVPN,
+            remotePairing: remotePairing,
+            currentPeer: currentPeer,
+            candidatePeers: candidatePeers
+        ) {
+            verboseLog("[minimuxer] [net] retaining existing RPPairing endpoint on unchanged VPN route")
+            return
+        }
         switch connectionMode {
             case .notConfigured:
                 debugLog("[minimuxer] [net] connection mode not configured. skipping endpoint update...")

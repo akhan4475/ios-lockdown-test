@@ -2,7 +2,7 @@ name: Build unsigned IPA
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/cellular-handoff]
   workflow_dispatch:
 
 permissions:
@@ -76,6 +76,12 @@ jobs:
 
       - name: Install XcodeGen
         run: brew install xcodegen
+
+      - name: Test endpoint retention during cellular handoff
+        run: |
+          swiftc Vendor/minimuxer/Sources/Services/EndpointRetentionPolicy.swift \
+            Tests/EndpointRetentionTests.swift -o /tmp/endpoint-retention-tests
+          /tmp/endpoint-retention-tests
 
       - name: Generate Xcode project
         run: xcodegen generate
