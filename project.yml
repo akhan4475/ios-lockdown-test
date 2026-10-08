@@ -18,6 +18,8 @@ targets:
       path: Resources/Info.plist
       properties:
         CFBundleDisplayName: Lockdown Test
+        CFBundleShortVersionString: "0.3.0"
+        CFBundleVersion: "8"
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
         NSLocationWhenInUseUsageDescription: Used only to start a simulated drive from your real position.

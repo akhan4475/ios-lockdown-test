@@ -2,7 +2,7 @@ name: Build unsigned IPA
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/cellular-handoff]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,7 @@ env:
 
 jobs:
   idevice:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     steps:
       - name: Restore cached xcframework
         id: cache
@@ -64,7 +64,7 @@ jobs:
 
   build:
     needs: idevice
-    runs-on: macos-15
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -77,8 +77,26 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Test endpoint retention during cellular handoff
+        run: |
+          swiftc Vendor/minimuxer/Sources/Services/EndpointRetentionPolicy.swift \
+            Tests/EndpointRetentionTests.swift -o /tmp/endpoint-retention-tests
+          /tmp/endpoint-retention-tests
+
+      - name: Test outside startup confirmation
+        run: |
+          swiftc Sources/OutsideStartupPolicy.swift Tests/OutsideStartupTests.swift \
+            -o /tmp/outside-startup-tests
+          /tmp/outside-startup-tests
+
       - name: Generate Xcode project
         run: xcodegen generate
+
+      - name: Test session alert transitions
+        run: |
+          swiftc Sources/SessionAlertPolicy.swift Tests/SessionAlertTests.swift \
+            -o /tmp/session-alert-tests
+          /tmp/session-alert-tests
 
       - name: Build (unsigned)
         run: |
