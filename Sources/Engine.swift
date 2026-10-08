@@ -52,7 +52,12 @@ final class LocationEngine: ObservableObject {
     @Published var failCount = 0
     @Published var lastError = ""
 
-    @Published var keepAlive = true
+    @Published var keepAlive = true {
+        didSet {
+            guard holding else { return }
+            if keepAlive { KeepAlive.shared.start() } else { KeepAlive.shared.stop() }
+        }
+    }
     @Published var overridePeer: String = UserDefaults.standard.string(forKey: "overridePeer") ?? "" {
         didSet { UserDefaults.standard.set(overridePeer, forKey: "overridePeer") }
     }
@@ -120,8 +125,12 @@ final class LocationEngine: ObservableObject {
 
     // MARK: Connection
 
-    func bootstrap() async {
+    func bootstrap(attempts: Int = 1) async {
         guard !busy else { return }
+        guard !holding else {
+            message = "The location session is already running. Keep LocalDevVPN connected; reconnecting is not needed for a working session. Clear location first if you need a fresh connection."
+            return
+        }
         busy = true
         defer { busy = false }
         isReady = false
@@ -149,24 +158,31 @@ final class LocationEngine: ObservableObject {
             getConnectionMode: { .localVPN }
         )
 
-        status = "Connecting..."
-        await core.bindConnectionConfig(binding)
-        do {
-            try await core.start(pairingFile: text, mountPath: docsURL.path, preferred: .rppairing)
-        } catch {
-            status = "Start failed: \(error)"
-            return
+        let limit = min(max(attempts, 1), 3)
+        for attempt in 1...limit {
+            guard !Task.isCancelled else { return }
+            status = limit > 1 ? "Connecting (\(attempt)/\(limit))..." : "Connecting..."
+            await core.bindConnectionConfig(binding)
+            do {
+                try await core.start(pairingFile: text, mountPath: docsURL.path, preferred: .rppairing)
+                let ready = await core.isReady(withNetworkCheck: false, withDDIMountCheck: false)
+                if case .failure(let err) = ready {
+                    status = "Not connected: \(core.describeError(err)). Is LocalDevVPN on?"
+                } else {
+                    ddiMounted = try? await core.isDDIMounted()
+                    isReady = true
+                    message = ""
+                    status = ddiMounted == false ? "Connected. Developer image not mounted (see Setup)." : "Ready"
+                    return
+                }
+            } catch {
+                status = "Start failed: \(error)"
+            }
+            if attempt < limit {
+                do { try await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000) }
+                catch { return }
+            }
         }
-
-        let ready = await core.isReady(withNetworkCheck: false, withDDIMountCheck: false)
-        if case .failure(let err) = ready {
-            status = "Not connected: \(core.describeError(err)). Is LocalDevVPN on?"
-            return
-        }
-
-        ddiMounted = try? await core.isDDIMounted()
-        isReady = true
-        status = ddiMounted == false ? "Connected. Developer image not mounted (see Setup)." : "Ready"
     }
 
     func mountDDI() async {

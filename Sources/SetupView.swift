@@ -4,11 +4,13 @@ struct SetupView: View {
     @EnvironmentObject var engine: LocationEngine
     @Environment(\.dismiss) private var dismiss
     @State private var showImporter = false
+    @State private var showOutsideSetup = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Connection") {
+                    Button("Start without Wi-Fi...") { showOutsideSetup = true }
                     Text(engine.status).font(.footnote)
                     Button(engine.busy ? "Working..." : "Reconnect") {
                         Task { await engine.bootstrap() }
@@ -44,6 +46,8 @@ struct SetupView: View {
 
                 Section("Options") {
                     Toggle("Keep alive in background (silent audio)", isOn: $engine.keepAlive)
+                    Text("Helps location updates continue when you lock the phone or switch apps. It uses extra battery and does not keep the app running after a force-quit or restart.")
+                        .font(.caption).foregroundStyle(.secondary)
                     TextField("Override tunnel peer IP (optional)", text: $engine.overridePeer)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
@@ -54,6 +58,7 @@ struct SetupView: View {
                 }
             }
             .navigationTitle("Setup")
+            .sheet(isPresented: $showOutsideSetup) { OutsideSetupView().environmentObject(engine) }
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .fileImporter(isPresented: $showImporter, allowedContentTypes: [.item]) { result in
                 if case .success(let url) = result {

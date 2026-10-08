@@ -6,6 +6,7 @@ final class KeepAlive {
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
     private var running = false
+    private var configured = false
 
     func start() {
         guard !running else { return }
@@ -22,8 +23,11 @@ final class KeepAlive {
             buffer.frameLength = frames
             for i in 0..<Int(frames) { samples[i] = 0 }
 
-            engine.attach(player)
-            engine.connect(player, to: engine.mainMixerNode, format: format)
+            if !configured {
+                engine.attach(player)
+                engine.connect(player, to: engine.mainMixerNode, format: format)
+                configured = true
+            }
             try engine.start()
             player.scheduleBuffer(buffer, at: nil, options: .loops)
             player.play()

@@ -83,6 +83,12 @@ jobs:
             Tests/EndpointRetentionTests.swift -o /tmp/endpoint-retention-tests
           /tmp/endpoint-retention-tests
 
+      - name: Test outside startup confirmation
+        run: |
+          swiftc Sources/OutsideStartupPolicy.swift Tests/OutsideStartupTests.swift \
+            -o /tmp/outside-startup-tests
+          /tmp/outside-startup-tests
+
       - name: Generate Xcode project
         run: xcodegen generate
 
