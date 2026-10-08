@@ -92,6 +92,12 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Test session alert transitions
+        run: |
+          swiftc Sources/SessionAlertPolicy.swift Tests/SessionAlertTests.swift \
+            -o /tmp/session-alert-tests
+          /tmp/session-alert-tests
+
       - name: Build (unsigned)
         run: |
           xcodebuild \

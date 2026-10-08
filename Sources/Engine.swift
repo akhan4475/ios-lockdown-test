@@ -225,6 +225,7 @@ final class LocationEngine: ObservableObject {
 
     private func startTicker() {
         ticker?.cancel()
+        SessionAlerts.shared.beginSession()
         holding = true
         okCount = 0
         failCount = 0
@@ -244,17 +245,21 @@ final class LocationEngine: ObservableObject {
     }
 
     private func send(_ c: CLLocationCoordinate2D) async {
+        let alertSession = SessionAlerts.shared.sessionID
         do {
             try await Minimuxer.shared.core.setSimulatedLocation(latitude: c.latitude, longitude: c.longitude)
             okCount += 1
             lastError = ""
+            SessionAlerts.shared.commandSucceeded(for: alertSession)
         } catch {
             failCount += 1
             lastError = "\(error)"
+            SessionAlerts.shared.commandFailed(for: alertSession)
         }
     }
 
     func clearLocation() async {
+        SessionAlerts.shared.endSession()
         ticker?.cancel()
         await ticker?.value
         ticker = nil

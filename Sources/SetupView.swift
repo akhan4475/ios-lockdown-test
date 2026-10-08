@@ -5,6 +5,7 @@ struct SetupView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showImporter = false
     @State private var showOutsideSetup = false
+    @ObservedObject private var alerts = SessionAlerts.shared
 
     var body: some View {
         NavigationStack {
@@ -42,6 +43,29 @@ struct SetupView: View {
                     .disabled(!engine.isReady || engine.busy)
                     Text("Needed again after each phone restart.")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section("Connection alerts") {
+                    Text(alerts.enabled ? "Connection alerts are enabled." : "Connection alerts are off.")
+                    if alerts.enabled {
+                        Button("Turn alerts off") { alerts.disable() }
+                        Button("Send a test notification in 3 seconds") { alerts.testNotification() }
+                    } else {
+                        Button("Enable alerts") {
+                            Task {
+                                await alerts.enable()
+                                if engine.holding { alerts.beginSession() }
+                            }
+                        }
+                    }
+                    Text(alerts.permissionText).font(.caption).foregroundStyle(.secondary)
+                    Text("Alerts warn once when a location command fails, or if successful updates go quiet for about 20–25 seconds. A scheduled warning can still appear if the app stops while the phone is on. Clear location cancels monitoring.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Alerts cannot verify Find My, turn sharing off, or reach a powered-off phone. Focus and notification settings can silence or delay them.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !alerts.schedulingError.isEmpty {
+                        Text(alerts.schedulingError).font(.caption).foregroundStyle(.orange)
+                    }
                 }
 
                 Section("Options") {
