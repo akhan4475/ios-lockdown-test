@@ -22,9 +22,9 @@ struct SessionAlertPolicy {
 
     mutating func success(at now: Double) -> (recovered: Bool, rearm: Bool) {
         guard active else { return (false, false) }
-        let quiet = lastSuccess.map { now - $0 >= watchdogDelay - refreshInterval } ?? false
+        let quiet = lastSuccess.map { now - $0 >= Self.watchdogDelay - Self.refreshInterval } ?? false
         let recovered = warned || quiet
-        let rearm = recovered || (lastArm.map { now - $0 >= refreshInterval } ?? true)
+        let rearm = recovered || (lastArm.map { now - $0 >= Self.refreshInterval } ?? true)
         warned = false
         lastSuccess = now
         if rearm { lastArm = now }
